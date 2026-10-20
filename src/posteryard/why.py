@@ -101,16 +101,21 @@ def lines(name: str, result: Report) -> list[str]:
     for group, candidates in result.groups:
         out += ["", f"  {group}, best voted first:"]
         for number, candidate in enumerate(candidates, 1):
-            ref = candidate.ref
-            verdict = "used" if ref.path == result.art else candidate.reason or "clean"
-            verdict = "skipped by art next" if ref.path in result.skipped else verdict
-            out.append(f"  {number:>3}. {_name(ref.path)}  {ref.width}x{ref.height}  {_votes(ref)}  {verdict}")
+            ref, said = candidate.ref, verdict(result, candidate)
+            out.append(f"  {number:>3}. {_name(ref.path)}  {ref.width}x{ref.height}  {votes(ref)}  {said}")
     if result.unchecked:
         out += ["", f"  Not checked, art was found earlier: {', '.join(result.unchecked)}."]
     return out
 
 
-def _votes(ref: ImageRef) -> str:
+def verdict(result: Report, candidate: Candidate) -> str:
+    """Why a candidate was used or not: "used", "skipped by art next", the reason it was rejected, or "clean"."""
+    if candidate.ref.path in result.skipped:
+        return "skipped by art next"
+    return "used" if candidate.ref.path == result.art else candidate.reason or "clean"
+
+
+def votes(ref: ImageRef) -> str:
     if apple.is_apple(ref.path):
         return "Apple TV"
     if is_fanart(ref.path):

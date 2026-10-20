@@ -180,6 +180,59 @@ class Store:
         with self._lock:
             return dict(self._db.execute("SELECT status, COUNT(*) FROM images GROUP BY status").fetchall())
 
+    def records(
+        self, *, status: str | None = None, rating_key: str | None = None, limit: int = 100, offset: int = 0
+    ) -> list[Record]:
+        """Image records, most recently changed first, for the web UI."""
+        where, values = [], []
+        if status is not None:
+            where.append("status=?")
+            values.append(status)
+        if rating_key is not None:
+            where.append("rating_key=?")
+            values.append(rating_key)
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        with self._lock:
+            rows = self._db.execute(
+                f"SELECT {COLUMNS} FROM images {clause} ORDER BY updated_at DESC, rating_key, target LIMIT ? OFFSET ?",
+                (*values, limit, offset),
+            ).fetchall()
+        return [Record(*row) for row in rows]
+
+    def count(self, status: str | None = None) -> int:
+        with self._lock:
+            if status is None:
+                return int(self._db.execute("SELECT COUNT(*) FROM images").fetchone()[0])
+            return int(self._db.execute("SELECT COUNT(*) FROM images WHERE status=?", (status,)).fetchone()[0])
+
+    def last_error(self, rating_key: str, target: str) -> str:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT last_error FROM images WHERE rating_key=? AND target=?", (rating_key, target)
+            ).fetchone()
+        return str(row[0]) if row else ""
+
+    def statuses(self, target: str = "poster") -> dict[str, str]:
+        """Each rating key's status for one target, to mark many titles at once."""
+        with self._lock:
+            rows = self._db.execute("SELECT rating_key, status FROM images WHERE target=?", (target,)).fetchall()
+        return {str(key): str(status) for key, status in rows}
+
+    def all_overrides(self) -> dict[str, Override]:
+        with self._lock:
+            rows = self._db.execute("SELECT rating_key, custom, source, skip FROM overrides").fetchall()
+        return {
+            str(key): Override(custom=custom or None, source=source, skip=frozenset(json.loads(skip)))
+            for key, custom, source, skip in rows
+        }
+
+    def guides(self) -> list[GuideRecord]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT key, title, fingerprint, image_key, picture, seen_at FROM guide ORDER BY title, key"
+            ).fetchall()
+        return [GuideRecord(*row) for row in rows]
+
     def override(self, rating_key: str) -> Override | None:
         with self._lock:
             row = self._db.execute(

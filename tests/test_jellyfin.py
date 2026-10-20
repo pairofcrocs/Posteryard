@@ -197,8 +197,13 @@ def test_collection_calls(serve: Any) -> None:
 
 
 def test_poster_bytes_and_selected(serve: Any) -> None:
-    jellyfin, _ = serve({f"/Items/{MOVIE}/Images/Primary": b"\xff\xd8", f"/Items/{MOVIE}": FORD})
+    jellyfin, _ = serve({
+        f"/Items/{MOVIE}/Images/Primary": b"\xff\xd8", f"/Items/{MOVIE}/Images/Backdrop": b"art",
+        f"/Items/{MOVIE}": FORD,
+    })  # fmt: skip
     assert jellyfin.poster_bytes({"ratingKey": MOVIE}) == b"\xff\xd8"
+    assert jellyfin.image_bytes({"ratingKey": MOVIE}, "thumb") == b"\xff\xd8"
+    assert jellyfin.image_bytes({"ratingKey": MOVIE}, "art") == b"art"
     assert jellyfin.selected(MOVIE, "poster") == "p1"
     assert jellyfin.selected(MOVIE, "art") == "b1"
 

@@ -102,6 +102,8 @@ To go live, run `docker rm -f posteryard` and the same command with `DRY_RUN=fal
 
 Plex is not changed yet. Posteryard saves each poster to `data/previews`, such as `5646-poster.jpg`. Open a few to check them. `docker logs -f posteryard` shows progress.
 
+You can also check them in the [web UI](#web-ui): open `http://SERVER-IP:8000` and sign in with your `WEBHOOK_SECRET`.
+
 ### 4. Go live
 
 When you like them, change `DRY_RUN=true` to `false` in `compose.yml` and run `docker compose up -d` again. Posteryard uploads the images and locks them, so a Plex refresh keeps them.
@@ -111,9 +113,25 @@ Two more steps are worth it:
 - **New titles right away.** With Plex Pass, add `http://SERVER-IP:8000/webhook/YOUR-WEBHOOK-SECRET` under **Settings > Webhooks**. Without it, new titles get posters within 15 minutes.
 - **One poster tool at a time.** Turn off poster overlays in other tools, such as Kometa, or the two overwrite each other.
 
+## Web UI
+
+Open `http://SERVER-IP:8000` in a browser. Sign in with your `WEBHOOK_SECRET`, or with `UI_PASSWORD` if you set one.
+
+In the web UI you can:
+
+- See what Posteryard is doing, and pause it.
+- Browse your library and compare each poster with the server's own.
+- Pick other art, use your own image, or skip a title.
+- Check the previews, the recent changes and the problems, and retry what failed.
+- Change the settings, test the connections and restart.
+
+Settings saved in the web UI are kept in `data/settings.json`. They override the same lines in the compose file until you reset them in the web UI. If the settings do not load, for example on a first start without a TMDB key, Posteryard starts only the web UI, so you can fill them in there.
+
+Keep the web UI on your own network. To reach it from outside, put it behind a reverse proxy with HTTPS. `WEB_UI=false` turns it off. See [Web UI](docs/web-ui.md) for every page.
+
 ## Unraid
 
-Open **Apps**, search for **Posteryard** and choose **Install**. Fill in the TMDB API key, the Plex URL and token, and a webhook secret. Previews land in `/mnt/user/appdata/posteryard/previews`. The webhook port is `8098`. Use it in place of `8000` in every webhook address, such as `http://UNRAID-IP:8098/webhook/YOUR-WEBHOOK-SECRET` for Plex. The template runs as Unraid's `nobody` user (`--user=99:100`) with the same lockdown as the compose file, and restarts the container after a crash.
+Open **Apps**, search for **Posteryard** and choose **Install**. Fill in the TMDB API key, the Plex URL and token, and a webhook secret. Previews land in `/mnt/user/appdata/posteryard/previews`. The webhook port is `8098`. Use it in place of `8000` for the web UI and in every webhook address, such as `http://UNRAID-IP:8098/webhook/YOUR-WEBHOOK-SECRET` for Plex. The template runs as Unraid's `nobody` user (`--user=99:100`) with the same lockdown as the compose file, and restarts the container after a crash.
 
 To go live, open the container's **Edit** screen, set **Dry Run** to `false` and choose **Apply**. The container's **Logs** show progress.
 
@@ -126,7 +144,7 @@ curl -fsSL -o /boot/config/plugins/dockerMan/templates-user/my-Posteryard.xml \
 
 ## Settings
 
-Every setting except the first four has a default. Add a line under `environment:` only to change one. The [landing page](https://posteryard.sandobserver.com/#settings) builds these lines for you.
+Every setting except the first four has a default. Add a line under `environment:` only to change one. The [landing page](https://posteryard.sandobserver.com/#settings) builds these lines for you. You can also change them in the [web UI](#web-ui).
 
 | Setting | What it does | Default |
 | --- | --- | --- |
@@ -163,9 +181,11 @@ Every setting except the first four has a default. Add a line under `environment
 | `SWEEP_MINUTES` | Minutes between checks for new and changed titles. | `15` |
 | `DAILY_AT` | Time of the daily full pass, as `HH:MM` in your `TZ`. | `04:15` |
 | `LOG_LEVEL` | `debug`, `info`, `warning` or `error`. | `info` |
+| `UI_PASSWORD` | The password for the [web UI](docs/web-ui.md). Without it, sign in with `WEBHOOK_SECRET`. | |
+| `WEB_UI` | `false` turns the [web UI](docs/web-ui.md) off. Set it in the compose file only. | `true` |
 | `LISTEN_PORT` | Port inside the container. If you change it, change the right side of `ports:` too. | `8000` |
 | `DATA_DIR` | Folder inside the container for the database, previews and custom art. Keep the default. | `/data` |
-| `..._FILE` | Read a secret from a file, such as a [Docker secret](https://docs.docker.com/compose/how-tos/use-secrets/): `PLEX_TOKEN_FILE=/run/secrets/plex_token`. Works for `TMDB_API_KEY`, `FANART_API_KEY`, `PLEX_TOKEN`, `JELLYFIN_API_KEY`, `EMBY_API_KEY`, `WEBHOOK_SECRET`, `NOTIFY_URLS` and `HEARTBEAT_URL`. | |
+| `..._FILE` | Read a secret from a file, such as a [Docker secret](https://docs.docker.com/compose/how-tos/use-secrets/): `PLEX_TOKEN_FILE=/run/secrets/plex_token`. Works for `TMDB_API_KEY`, `FANART_API_KEY`, `PLEX_TOKEN`, `JELLYFIN_API_KEY`, `EMBY_API_KEY`, `WEBHOOK_SECRET`, `NOTIFY_URLS`, `HEARTBEAT_URL` and `UI_PASSWORD`. | |
 
 ## Change a poster
 
@@ -179,6 +199,7 @@ docker exec posteryard posteryard art next The Office
 
 ## Documentation
 
+- [Web UI](docs/web-ui.md): every page, the password and setup mode.
 - [Commands and labels](docs/commands.md): change, reset or skip a poster.
 - [Jellyfin and Emby](docs/jellyfin-and-emby.md): setup and differences from Plex.
 - [How it works](docs/how-it-works.md): what each image looks like, where the art comes from, when it runs, and what it changes.

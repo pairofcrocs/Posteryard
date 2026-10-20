@@ -337,3 +337,14 @@ def test_guide_target_is_none_for_an_entry_without_a_guid() -> None:
     plex, asked = guide_by_id({1: ""})
     assert plex.guide_target(GUIDE, SHOW, "") is None
     assert asked == []
+
+
+def test_image_bytes_reads_the_shown_poster_background_or_thumbnail(serve: Any) -> None:
+    plex, _ = serve({"/library/metadata/1/thumb/5": b"poster", "/library/metadata/1/art/6": b"background"})
+    item = {"ratingKey": "1", "thumb": "/library/metadata/1/thumb/5", "art": "/library/metadata/1/art/6"}
+    assert plex.image_bytes(item, "poster") == b"poster"
+    assert plex.image_bytes(item, "thumb") == b"poster"
+    assert plex.image_bytes(item, "art") == b"background"
+    with pytest.raises(http.HttpError) as caught:
+        plex.image_bytes({"ratingKey": "1"}, "art")
+    assert caught.value.status == 404

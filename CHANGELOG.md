@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Add a web UI on the webhook port, at `http://SERVER-IP:8000`. It has a dashboard, the library with each title's images, previews, activity, problems, Live TV and tools. Sign in with `WEBHOOK_SECRET`, or with the new `UI_PASSWORD`. `WEB_UI=false` turns it off.
+- Pick other art, use your own image, skip a title or render it again from the web UI.
+- Pause and resume Posteryard from the web UI, and retry every failed title at once.
+- Change the settings in the web UI, test the media server, TMDB, fanart.tv, Maintainerr and alert connections, and restart to apply them. Saved settings are kept in `data/settings.json` and override the environment.
+- Start only the web UI when the settings do not load, so they can be fixed there, instead of exiting. Without any password, the first visitor chooses one.
+
+### Changed
+
+- Check the service with the `health` command even when the settings do not load.
+- Open the web UI from the Unraid Docker tab, and set its password in the template.
+
 ## [0.10.0] - 2026-10-17
 
 ### Added

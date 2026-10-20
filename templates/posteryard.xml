@@ -6,6 +6,7 @@
   <Network>bridge</Network>
   <Privileged>false</Privileged>
   <ExtraParams>--user=99:100 --restart=unless-stopped --init --read-only --tmpfs=/tmp --cap-drop=ALL --security-opt=no-new-privileges:true --memory=1536m</ExtraParams>
+  <WebUI>http://[IP]:[PORT:8000]/</WebUI>
   <Support>https://github.com/SandObserver/Posteryard/issues</Support>
   <Project>https://github.com/SandObserver/Posteryard</Project>
   <ReadMe>https://github.com/SandObserver/Posteryard/blob/main/README.md</ReadMe>
@@ -48,7 +49,7 @@
   <ExtraSearchTerms>plex jellyfin emby posters artwork tmdb kometa textless</ExtraSearchTerms>
   <DonateText>If Posteryard is useful to you, you can buy me a coffee.</DonateText>
   <DonateLink>https://buymeacoffee.com/sandobserver</DonateLink>
-  <Config Name="Webhook Port" Target="8000" Default="8098" Mode="tcp" Description="Port for the Plex, Jellyfin or Emby webhook and the /healthz check." Type="Port" Display="always" Required="true" Mask="false">8098</Config>
+  <Config Name="Webhook Port" Target="8000" Default="8098" Mode="tcp" Description="Port for the web UI, the Plex, Jellyfin or Emby webhook and the /healthz check." Type="Port" Display="always" Required="true" Mask="false">8098</Config>
   <Config Name="Data" Target="/data" Default="/mnt/user/appdata/posteryard" Mode="rw" Description="Database, previews and custom art. Keep this, or every image is rendered and uploaded again." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/posteryard</Config>
   <Config Name="TMDB API Key" Target="TMDB_API_KEY" Default="" Mode="" Description="A free key from TMDB, under Settings, API. The API Read Access Token works too." Type="Variable" Display="always" Required="true" Mask="true"></Config>
   <Config Name="Plex URL" Target="PLEX_URL" Default="" Mode="" Description="Your Plex server's address on the network, such as http://192.168.1.10:32400. Not localhost. Leave it empty for Jellyfin or Emby." Type="Variable" Display="always" Required="false" Mask="false"></Config>
@@ -83,4 +84,5 @@
   <Config Name="Daily Pass At" Target="DAILY_AT" Default="04:15" Mode="" Description="Time of the daily full pass, as HH:MM in your TZ." Type="Variable" Display="advanced" Required="false" Mask="false">04:15</Config>
   <Config Name="Heartbeat URL" Target="HEARTBEAT_URL" Default="" Mode="" Description="An address Posteryard calls every minute while healthy, such as an Uptime Kuma push URL." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
   <Config Name="Log Level" Target="LOG_LEVEL" Default="info" Mode="" Description="debug, info, warning or error." Type="Variable" Display="advanced" Required="false" Mask="false">info</Config>
+  <Config Name="Web UI Password" Target="UI_PASSWORD" Default="" Mode="" Description="The password for the web UI. Without it, sign in with WEBHOOK_SECRET." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
 </Container>

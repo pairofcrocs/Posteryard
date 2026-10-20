@@ -21,6 +21,8 @@ from posteryard.livetv import LiveTv
 from posteryard.notify import Event
 from posteryard.server import Item, MediaServer, is_item_key
 from posteryard.store import Store
+from posteryard.webui.app import WebUi
+from posteryard.webui.jobs import Job
 from posteryard.worker import Outcome, Worker
 
 log = logging.getLogger(__name__)
@@ -35,13 +37,15 @@ TICK = 30
 STOP = "stop"
 HEARTBEAT_SECONDS = 60
 RETRY_SECONDS = 120
-URGENT = frozenset({"webhook", "label", "unignored"})
+URGENT = frozenset({"webhook", "label", "unignored", "ui"})
 BACKGROUND = frozenset({"daily", "unlisted"})
 NEW_REASONS = frozenset({"webhook", "changed", "retry"})
 NEW_BATCH_SECONDS = 900
 NEW_WAIT_SECONDS = 300
 RESUMED = "resumed after a restart"
 LIVE_TV = "live-tv"
+JOB_PREFIX = "job:"
+RESTART = 3
 EVENT_NAMES = {Event.PROBLEMS: "problems", Event.NEW: "new posters", Event.SUMMARY: "daily summary"}
 
 
@@ -120,6 +124,17 @@ class Service:
         self._new_poster: bytes | None = None
         self._new_since = 0.0
         self._last_new = float("-inf")
+        self.ui: WebUi | None = None
+        self._jobs: dict[str, Job] = {}
+        self._held: list[tuple[str, str]] = []
+        self.current: dict[str, Any] | None = None
+        self.next_sweep_at: float | None = None
+        self.paused = threading.Event()
+        self._wake = threading.Event()
+        self._sweep_requested = False
+        self._full_requested = False
+        if store.meta("paused") == "1":
+            self.paused.set()
 
     def enqueue(self, keys: Iterable[str], reason: str) -> None:
         priority = 0 if reason in URGENT else 2 if reason in BACKGROUND else 1
@@ -130,9 +145,64 @@ class Service:
                 self._queued[key] = priority
                 self.queue.put((priority, next(self._order), key, reason))
 
+    def submit_job(self, job: Job) -> None:
+        """Run a web UI job on the worker thread, ahead of library items."""
+        key = f"{JOB_PREFIX}{job.id}"
+        with self._lock:
+            self._jobs[key] = job
+        self.enqueue([key], "ui")
+
+    def queued_job(self, key: str) -> Job | None:
+        """The web UI job behind a `job:<id>` queue key."""
+        with self._lock:
+            return self._jobs.get(key)
+
+    def held(self) -> int:
+        """Library items taken from the queue while paused. They go back in on resume."""
+        with self._lock:
+            return len(self._held)
+
+    def queue_snapshot(self) -> list[tuple[int, str, str]]:
+        """Waiting work in the order it runs: (priority, key, reason)."""
+        with self._lock:
+            entries = sorted(self.queue.queue)
+            return [(p, key, reason) for p, _, key, reason in entries if self._queued.get(key) == p]
+
+    def pause(self) -> None:
+        """Stop sweeps, full passes and library items. Web UI jobs still run."""
+        self.store.set_meta("paused", "1")
+        self.paused.set()
+        log.info("paused from the web UI: no sweeps, full passes or library items until resumed")
+
+    def resume_work(self) -> None:
+        self.store.set_meta("paused", "0")
+        self.paused.clear()
+        with self._lock:
+            held, self._held = self._held, []
+        for key, reason in held:
+            self.enqueue([key], reason)
+        log.info("resumed from the web UI", extra={"waiting": len(held)})
+        self._wake.set()
+
+    def request_sweep(self) -> None:
+        """Have the schedule thread sweep now, so a sweep never runs on two threads at once."""
+        self._sweep_requested = True
+        self._wake.set()
+
+    def request_full(self) -> None:
+        self._full_requested = True
+        self._wake.set()
+
+    def request_restart(self) -> None:
+        """Stop, and have `serve` start again with the saved settings."""
+        log.info("restarting to apply new settings")
+        self.exit_code = RESTART
+        self.stop()
+
     def stop(self) -> None:
         """Wake the worker. It must not sleep through a stop: Docker kills the container after 10 seconds."""
         self._stop.set()
+        self._wake.set()
         self.queue.put((-1, next(self._order), "", STOP))
 
     def take(self, timeout: float) -> tuple[str, str]:
@@ -172,24 +242,52 @@ class Service:
                 self.announce_new(idle=True)
                 self.worker.rest()
                 continue
-            if key == LIVE_TV:
-                self._live_tv()
+            if key.startswith(JOB_PREFIX):
+                self._run_job(key)
                 continue
-            started = time.monotonic()
-            try:
-                outcome = self.worker.process(key)
-            except Exception:
-                log.exception("unexpected error", extra={"key": key})
-                outcome = Outcome.FAILED
-            took = logfmt.took(time.monotonic() - started)
-            log.debug("item processed", extra={"key": key, "outcome": outcome, "trigger": reason, "took": took})
-            if self._full_started is not None:
-                self._tally[outcome] += 1
-            if reason in NEW_REASONS:
-                self.collect_new(self.worker.fresh)
-            self.announce_new(idle=False)
-            memory.release()
-            self.worker_beat = time.monotonic()
+            if self.paused.is_set():
+                with self._lock:
+                    self._held.append((key, reason))
+                continue
+            if key == LIVE_TV:
+                self.current = {"key": key, "reason": reason, "started": time.time()}
+                self._live_tv()
+                self.current = None
+                continue
+            self._process(key, reason)
+
+    def _process(self, key: str, reason: str) -> None:
+        started = time.monotonic()
+        self.current = {"key": key, "reason": reason, "started": time.time()}
+        try:
+            outcome = self.worker.process(key)
+        except Exception:
+            log.exception("unexpected error", extra={"key": key})
+            outcome = Outcome.FAILED
+        finally:
+            self.current = None
+        took = logfmt.took(time.monotonic() - started)
+        log.debug("item processed", extra={"key": key, "outcome": outcome, "trigger": reason, "took": took})
+        if self._full_started is not None:
+            self._tally[outcome] += 1
+        if reason in NEW_REASONS:
+            self.collect_new(self.worker.fresh)
+        self.announce_new(idle=False)
+        memory.release()
+        self.worker_beat = time.monotonic()
+
+    def _run_job(self, key: str) -> None:
+        with self._lock:
+            job = self._jobs.pop(key, None)
+        if job is None or self.ui is None:
+            return
+        self.current = {"key": key, "reason": "ui", "label": job.label, "started": time.time()}
+        try:
+            self.ui.jobs.execute(job)
+        finally:
+            self.current = None
+        memory.release()
+        self.worker_beat = time.monotonic()
 
     def check_live_tv(self) -> None:
         if self.live_tv is None or self._live_tv_running.is_set():
@@ -408,16 +506,22 @@ class Service:
             sort_keys=True,
         )
 
-    def _schedule(self) -> None:  # noqa: C901
+    def _rest(self) -> None:
+        """Wait a tick, or less when a stop or a web UI request comes."""
+        self._wake.wait(TICK)
+        self._wake.clear()
+
+    def _schedule(self) -> None:  # noqa: C901, PLR0912, PLR0915
         next_sweep = 0.0
         lookback = RESTART_LOOKBACK
         resumed = False
         retry_at = 0.0
         self.worker.notifier.resolve("restart", "Posteryard is running again.")
         while not self._stop.is_set():
-            if time.monotonic() < retry_at:
+            requested = self._sweep_requested or self._full_requested
+            if time.monotonic() < retry_at and not requested:
                 self.heartbeat()
-                self._stop.wait(TICK)
+                self._rest()
                 continue
             try:
                 if not self.server_checked.is_set():
@@ -430,6 +534,12 @@ class Service:
                     self.server_checked.set()
                 if not self._connected:
                     self.connect()
+                if self.paused.is_set():
+                    # A pause is no stall: health stays green while nothing is scheduled.
+                    self.last_sweep_ok = time.monotonic()
+                    self.heartbeat()
+                    self._rest()
+                    continue
                 signature = self.settings_signature()
                 if not resumed:
                     if self.store.meta("settings_signature") == signature:
@@ -442,10 +552,15 @@ class Service:
                 last_full = self.store.meta("last_full")
                 if not last_full or (last_full != now.date().isoformat() and now.time() >= self.cfg.daily_at):
                     self.full("daily")
-                if time.monotonic() >= next_sweep:
+                if self._full_requested:
+                    self._full_requested = False
+                    self.full("web UI")
+                if self._sweep_requested or time.monotonic() >= next_sweep:
+                    self._sweep_requested = False
                     self.sweep(lookback)
                     lookback = SWEEP_LOOKBACK
                     next_sweep = time.monotonic() + self.cfg.sweep_minutes * 60
+                    self.next_sweep_at = next_sweep
                     self.check_live_tv()
                 self.worker.notifier.resolve("schedule", "Scheduled runs work again.")
             except (http.RequestError, OSError, ValueError, LookupError) as exc:
@@ -457,7 +572,7 @@ class Service:
                 self.worker.notifier.alert("schedule", f"A scheduled run failed: {type(exc).__name__}: {exc}")
                 retry_at = time.monotonic() + RETRY_SECONDS
             self.heartbeat()
-            self._stop.wait(TICK)
+            self._rest()
 
     def connect(self) -> None:
         found = [str(s.get("title")) for s in self._sections()]
@@ -495,6 +610,7 @@ class Service:
             "queue": len(self._queued),
             "images": self.store.counts(),
             "dry_run": self.cfg.dry_run,
+            "paused": self.paused.is_set(),
             "version": __version__,
         }
 
@@ -531,25 +647,37 @@ class Service:
                 self.end_headers()
                 self.wfile.write(data)
 
+            def _ui(self, method: str) -> None:
+                if service.ui is None:
+                    self._reply(404, {"error": "not found"})
+                else:
+                    service.ui.handle(self, method)
+
             def do_GET(self) -> None:
                 path = self.path.split("?")[0]
                 if path == "/healthz":
                     status = service.status()
                     self._reply(200 if status["ok"] else 503, status)
                 else:
-                    self._reply(404, {"error": "not found"})
+                    self._ui("GET")
 
             def do_HEAD(self) -> None:
                 if self.path.split("?")[0] != "/healthz":
-                    self.send_response(404)
-                else:
-                    self.send_response(200 if service.healthy() else 503)
+                    self._ui("HEAD")
+                    return
+                self.send_response(200 if service.healthy() else 503)
                 self.send_header("Content-Length", "0")
                 self.end_headers()
 
+            def do_PUT(self) -> None:
+                self._ui("PUT")
+
+            def do_DELETE(self) -> None:
+                self._ui("DELETE")
+
             def do_POST(self) -> None:
                 if not hmac.compare_digest(self.path.split("?")[0].encode(), webhook_path.encode()):
-                    self._reply(404, {"error": "not found"})
+                    self._ui("POST")
                     return
                 raw_length = self.headers.get("Content-Length") or "0"
                 length = int(raw_length) if raw_length.isascii() and raw_length.isdigit() else 0
@@ -600,6 +728,7 @@ class Service:
             ("Alerts", alerts),
             ("Heartbeat", "on" if cfg.heartbeat_url else "off"),
             ("Webhook", f":{cfg.listen_port} in the container"),
+            ("Web UI", f"http://SERVER-IP:{cfg.listen_port}" if cfg.web_ui else "off, WEB_UI=false"),
             ("Data", str(cfg.data_dir)),
         ]
         if cfg.only_rating_keys:
@@ -615,7 +744,13 @@ class Service:
         if dropped:
             log.info("old cached choices deleted", extra={"rows": dropped})
 
+    def attach_ui(self) -> None:
+        if self.cfg.web_ui and self.ui is None:
+            password = self.cfg.ui_password or self.cfg.webhook_secret
+            self.ui = WebUi(self.cfg.data_dir, password, cfg=self.cfg, service=self)
+
     def run(self) -> int:
+        self.attach_ui()
         print(self.banner(), flush=True)
         self.drop_old_choices()
         log.info(

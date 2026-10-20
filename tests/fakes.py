@@ -60,6 +60,9 @@ class FakeServer(MediaServer):
     def poster_bytes(self, item: Item) -> bytes:
         return b""
 
+    def image_bytes(self, item: Item, target: Target) -> bytes:
+        return self.poster_bytes(item) if target == "poster" else b""
+
     def remove_label(self, item: Item, label: str) -> None:
         pass
 

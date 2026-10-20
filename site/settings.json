@@ -67,6 +67,8 @@
     "DRY_RUN": "install block",
     "LISTEN_PORT": "ports: in the compose file",
     "DATA_DIR": "volumes: in the compose file",
-    "PLEX_LIBRARIES": "old name of LIBRARIES"
+    "PLEX_LIBRARIES": "old name of LIBRARIES",
+    "UI_PASSWORD": "Settings in the web UI",
+    "WEB_UI": "docs/web-ui.md"
   }
 }

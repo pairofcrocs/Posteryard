@@ -220,6 +220,13 @@ class Plex:
             raise http.RequestError("the item has no poster", self._url(f"/library/metadata/{item.get('ratingKey')}"))
         return self._send("GET", thumb, timeout=60)
 
+    def image_bytes(self, item: Item, target: Target) -> bytes:
+        """The image the server shows now: poster, background or episode thumbnail."""
+        path = str(item.get("art") if target == "art" else item.get("thumb") or "")
+        if not path.startswith("/library/"):
+            raise http.HttpError(404, self._url(f"/library/metadata/{item.get('ratingKey')}"), f"no {target}")
+        return self._send("GET", path, timeout=60)
+
     def remove_label(self, item: Item, label: str) -> None:
         self._send(
             "PUT",

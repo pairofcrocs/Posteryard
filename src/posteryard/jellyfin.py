@@ -292,6 +292,14 @@ class Jellyfin:
             timeout=60,
         )
 
+    def image_bytes(self, item: Item, target: Target) -> bytes:
+        return http.request(
+            "GET",
+            self._url(f"/Items/{self._id(str(item['ratingKey']))}/Images/{IMAGE_TYPES[target]}"),
+            headers=self._auth,
+            timeout=60,
+        )
+
     def _save_tags(self, raw: dict[str, Any], tags: list[str]) -> None:
         raw["Tags"] = tags
 

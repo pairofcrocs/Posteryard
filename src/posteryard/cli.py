@@ -1,7 +1,9 @@
 import argparse
 import logging
+import os
 import re
 import shlex
+import sys
 import tempfile
 import urllib.error
 import urllib.request
@@ -18,11 +20,12 @@ from posteryard.maintainerr import Maintainerr
 from posteryard.notify import Notifier
 from posteryard.plex import Plex
 from posteryard.server import MediaServer
-from posteryard.service import Service, other_server
+from posteryard.service import RESTART, Service, other_server
 from posteryard.settings import Settings
 from posteryard.sources import Sources
 from posteryard.store import Store, StoreError
 from posteryard.tmdb import Kind, Tmdb
+from posteryard.webui import setup
 from posteryard.worker import Outcome, Worker
 
 log = logging.getLogger("posteryard")
@@ -148,7 +151,7 @@ def _preview_live_tv(cfg: config.Config, out_dir: Path) -> int:
     except config.ConfigError as exc:
         print(exc)
         return 2
-    server = _server(cfg)
+    server = media_server(cfg)
     if not _has_guide(server):
         print(f"Live TV posters work with Plex and Jellyfin, not {server.name}.")
         return 2
@@ -194,7 +197,7 @@ def _preview(args: argparse.Namespace, cfg: config.Config) -> int:  # noqa: C901
             print(exc)
             return 2
 
-    plex = _server(cfg) if args.title else None
+    plex = media_server(cfg) if args.title else None
     keys: list[str] = []
     if plex is not None:
         try:
@@ -245,7 +248,7 @@ def _preview(args: argparse.Namespace, cfg: config.Config) -> int:  # noqa: C901
 
 
 def _find(args: argparse.Namespace, cfg: config.Config) -> int:
-    plex = _server(cfg)
+    plex = media_server(cfg)
     query = " ".join(args.words)
     matches = lookup.search(lookup.library_titles(plex, cfg.libraries), query)
     if not matches:
@@ -273,7 +276,8 @@ def _has_guide(server: MediaServer) -> TypeGuard[Plex | Jellyfin]:
     return isinstance(server, Plex) or (isinstance(server, Jellyfin) and not isinstance(server, Emby))
 
 
-def _server(cfg: config.Config) -> MediaServer:
+def media_server(cfg: config.Config) -> MediaServer:
+    """The media server the settings name."""
     if cfg.jellyfin_url:
         return Jellyfin(cfg.jellyfin_url, cfg.jellyfin_api_key)
     if cfg.emby_url:
@@ -281,14 +285,14 @@ def _server(cfg: config.Config) -> MediaServer:
     return Plex(cfg.plex_url, cfg.plex_token)
 
 
-def _health(cfg: config.Config) -> int:
+def _health(port: int) -> int:
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{cfg.listen_port}/healthz", timeout=4):
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=4):
             return 0
     except urllib.error.HTTPError as exc:
         print(f"unhealthy: HTTP {exc.code}")
     except OSError as exc:
-        print(f"not reachable on port {cfg.listen_port}: {exc}")
+        print(f"not reachable on port {port}: {exc}")
     return 1
 
 
@@ -304,21 +308,49 @@ def _test_alert(cfg: config.Config) -> int:
     return 1
 
 
-def main(argv: list[str] | None = None) -> int:  # noqa: C901, PLR0912
+def restart() -> int:
+    """Start `serve` again in this process, with the settings saved in the web UI."""
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os.execv(sys.executable, [sys.executable, "-m", "posteryard", "serve"])
+
+
+def _setup_mode(env: dict[str, str], problem: str) -> int:
+    print(problem, flush=True)
+    password = config.secret(env, "UI_PASSWORD") or config.secret(env, "WEBHOOK_SECRET")
+    port = config.listen_port(env)
+    try:
+        code = setup.serve(config.data_dir(env), password, problem, port)
+    except OSError as exc:
+        print(f"The web UI could not start on port {port}: {exc}")
+        return 2
+    return restart() if code == RESTART else code
+
+
+def main(argv: list[str] | None = None) -> int:
     logfmt.setup()
     args = _parser().parse_args(argv)
+    env = config.environment()
+    if args.command == "health":
+        # Not the whole configuration: the service answers in setup mode too.
+        return _health(config.listen_port(env))
     try:
-        cfg = config.load()
+        cfg = config.load(env)
         _set_log_level(cfg.log_level)
         if args.command == "serve":
             config.require_service(cfg)
         elif args.command in ("art", "forget", "find", "restore", "why"):
             config.require_server(cfg)
     except config.ConfigError as exc:
+        if args.command == "serve" and env.get("WEB_UI", "").strip().lower() not in config.FALSE:
+            return _setup_mode(env, str(exc))
         print(exc)
         return 2
-    if args.command == "health":
-        return _health(cfg)
+    code = _run(args, cfg)
+    return restart() if args.command == "serve" and code == RESTART else code
+
+
+def _run(args: argparse.Namespace, cfg: config.Config) -> int:  # noqa: C901
     if args.command == "preview":
         return _preview(args, cfg)
     if args.command == "test-alert":
@@ -326,7 +358,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901, PLR0912
     try:
         if args.command == "find":
             return _find(args, cfg)
-        plex = _server(cfg)
+        plex = media_server(cfg)
         store = Store(cfg.state_path)
     except http.RequestError as exc:
         print(exc)

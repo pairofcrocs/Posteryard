@@ -68,6 +68,8 @@ class Notifier:
         self._state = state
         self._lock = threading.Lock()
         self._muted, self._open = _load(state)
+        # When each open alert went out. Not saved: after a restart it is read back from the mute.
+        self._since = {cause: self._muted[cause] - QUIET_SECONDS for cause in self._open if cause in self._muted}
 
     @property
     def configured(self) -> bool:
@@ -87,6 +89,8 @@ class Notifier:
         with self._lock:
             if delivered:
                 self._muted[cause] = now + QUIET_SECONDS
+                if cause not in self._open:
+                    self._since[cause] = now
                 self._open.add(cause)
             self._save()
 
@@ -96,9 +100,15 @@ class Notifier:
             if cause not in self._open:
                 return
             self._open.discard(cause)
+            self._since.pop(cause, None)
             self._save()
         log.info("problem resolved", extra={"cause": cause})
         self.send(cause, message, apprise.NotifyType.SUCCESS)
+
+    def open_alerts(self) -> list[tuple[str, float | None]]:
+        """The causes alerted and not resolved yet, with when the alert went out."""
+        with self._lock:
+            return [(cause, self._since.get(cause)) for cause in sorted(self._open)]
 
     def new_posters(self, names: Sequence[str], poster: bytes | None = None) -> None:
         if Event.NEW not in self.events or not names:
