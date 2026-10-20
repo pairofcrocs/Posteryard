@@ -87,6 +87,26 @@ class WatchProviders(TypedDict, total=False):
     results: dict[str, RegionOffers]
 
 
+class CollectionRef(TypedDict, total=False):
+    id: int
+    name: str
+    poster_path: str | None
+
+
+class CollectionPart(TypedDict, total=False):
+    id: int
+    title: str
+    release_date: str | None
+    poster_path: str | None
+
+
+class Collection(TypedDict, total=False):
+    id: int
+    name: str
+    poster_path: str | None
+    parts: list[CollectionPart]
+
+
 Details = TypedDict(
     "Details",
     {
@@ -102,6 +122,7 @@ Details = TypedDict(
         "alternative_titles": AlternativeTitles,
         "external_ids": ExternalIds,
         "watch/providers": WatchProviders,
+        "belongs_to_collection": CollectionRef | None,
     },
     total=False,
 )
@@ -259,6 +280,21 @@ class Tmdb:
             lambda: self._get(f"/{kind}/{tmdb_id}/images", include_image_language=",".join(languages)),
         )
         return _refs(raw.get("logos") or [])
+
+    def collection(self, collection_id: int) -> Collection | None:
+        """The movies of a TMDB collection, or None when TMDB has no such collection."""
+
+        def load() -> Collection | None:
+            try:
+                data: Collection = self._get(f"/collection/{collection_id}")
+            except http.HttpError as exc:
+                if exc.status == 404:
+                    return None
+                raise
+            return data
+
+        found: Collection | None = self._cached(f"collection/{collection_id}", load)
+        return found
 
     def search(self, kind: Kind, query: str) -> list[dict[str, Any]]:
         raw = self._get(f"/search/{kind}", query=query, include_adult="false")

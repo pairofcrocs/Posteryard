@@ -26,7 +26,7 @@ from posteryard.ocr import TextLine
 from posteryard.server import Item, Target
 from posteryard.service import Service
 from posteryard.store import Store
-from posteryard.tmdb import Details, Episode, ImageRef, Images, Kind, RegionOffers
+from posteryard.tmdb import Collection, CollectionRef, Details, Episode, ImageRef, Images, Kind, RegionOffers
 from posteryard.worker import Worker
 from tests.fakes import FakeServer, FakeTmdb
 
@@ -43,6 +43,47 @@ SHOWS = [
     ("Shogun", 2024, 1), ("Slow Horses", 2022, 4), ("The Last of Us", 2023, 2), ("Fallout", 2024, 1),
 ]  # fmt: skip
 EPISODES = 6
+# TMDB collections by movie: (collection id, name, the movies in it as (TMDB id, title, release date)).
+# Ids above 9000 are movies the demo library does not have.
+COLLECTIONS = [
+    (
+        10,
+        "Dune Collection",
+        [(104, "Dune", "2021-09-15"), (105, "Dune: Part Two", "2024-02-27"), (9001, "Dune: Part Three", "2026-12-18")],
+    ),
+    (
+        20,
+        "John Wick Collection",
+        [
+            (9101, "John Wick", "2014-10-22"),
+            (9102, "John Wick: Chapter 2", "2017-02-08"),
+            (9103, "John Wick: Chapter 3 - Parabellum", "2019-05-15"),
+            (110, "John Wick: Chapter 4", "2023-03-22"),
+        ],
+    ),
+    (
+        30,
+        "The Matrix Collection",
+        [
+            (119, "The Matrix", "1999-03-30"),
+            (9201, "The Matrix Reloaded", "2003-05-15"),
+            (9202, "The Matrix Revolutions", "2003-11-05"),
+            (9203, "The Matrix Resurrections", "2021-12-16"),
+        ],
+    ),
+    (
+        40,
+        "Spider-Verse Collection",
+        [
+            (9301, "Spider-Man: Into the Spider-Verse", "2018-12-06"),
+            (116, "Spider-Man: Across the Spider-Verse", "2023-05-31"),
+            (9302, "Spider-Man: Beyond the Spider-Verse", ""),
+        ],
+    ),
+    (50, "Blade Runner Collection", [(9401, "Blade Runner", "1982-06-25"), (102, "Blade Runner 2049", "2017-10-04")]),
+    (60, "Top Gun Collection", [(9501, "Top Gun", "1986-05-16"), (121, "Top Gun: Maverick", "2022-05-21")]),
+]
+NAMES: dict[int, str] = {}
 MOVIE_SECTION, SHOW_SECTION = "1", "2"
 
 
@@ -52,8 +93,18 @@ def _colour(seed: str, shift: float = 0.0) -> tuple[int, int, int]:
     return int(r * 255), int(g * 255), int(b * 255)
 
 
+def logo(path: str) -> Image.Image:
+    """A white wordmark of the title on transparent ground."""
+    name = NAMES.get(int(path.strip("/").split("-")[0]), "Example")
+    image = Image.new("RGBA", (1200, 300), (0, 0, 0, 0))
+    ImageDraw.Draw(image).text((600, 150), name.upper(), fill=(255, 255, 255, 255), font_size=110, anchor="mm")
+    return image
+
+
 def art(path: str) -> Image.Image:
     """Soft gradient art with a few shapes, the same for the same path."""
+    if path.endswith("-logo.png"):
+        return logo(path)
     wide = "backdrop" in path or "still" in path
     size = (1920, 1080) if wide else (1000, 1500)
     top, bottom = _colour(path), _colour(path, 0.18)
@@ -93,12 +144,25 @@ class DemoTmdb(FakeTmdb):
     def details(self, kind: Kind, tmdb_id: int) -> Details:
         details = super().details(kind, tmdb_id)
         name = self.names.get(tmdb_id, "Example")
-        return {**details, "title": name, "name": name}
+        found = next(((c, n) for c, n, parts in COLLECTIONS if any(m == tmdb_id for m, _, _ in parts)), None)
+        collection: CollectionRef | None = {"id": found[0], "name": found[1]} if found else None
+        return {**details, "title": name, "name": name, "belongs_to_collection": collection}
 
     def images(self, kind: Kind, tmdb_id: int) -> Images:
-        posters = [ImageRef(f"/{tmdb_id}-poster-{n}.jpg", None, 2000, 3000, 6 - n, 20 - n) for n in range(4)]
+        # Every third title has no logo, and every fifth no textless poster, so the Missing page has something.
+        language = "en" if tmdb_id % 5 == 0 else None
+        posters = [ImageRef(f"/{tmdb_id}-poster-{n}.jpg", language, 2000, 3000, 6 - n, 20 - n) for n in range(4)]
         backdrops = [ImageRef(f"/{tmdb_id}-backdrop-{n}.jpg", None, 3840, 2160, 5 - n, 9 - n) for n in range(3)]
-        return Images(posters, backdrops, [])
+        logos = [] if tmdb_id % 3 == 0 else [ImageRef(f"/{tmdb_id}-logo.png", "en", 1200, 300, 5, 10)]
+        return Images(posters, backdrops, logos)
+
+    def collection(self, collection_id: int) -> Collection | None:
+        for found, name, parts in COLLECTIONS:
+            if found == collection_id:
+                return {"id": found, "name": name, "parts": [
+                    {"id": tid, "title": title, "release_date": released or None} for tid, title, released in parts
+                ]}  # fmt: skip
+        return None
 
     def season_images(self, show_id: int, season: int) -> Images:
         return Images([ImageRef(f"/{show_id}-season{season}.jpg", None, 2000, 3000, 5, 10)], [], [])
@@ -237,6 +301,7 @@ def main() -> int:
     })  # fmt: skip
     cfg = config.load(config.environment())
     server = DemoServer()
+    NAMES.update(server.tmdb_names())
     store = Store(cfg.state_path)
     worker = Worker(cfg, server, store, Notifier(), DemoTmdb(server.tmdb_names()))
     worker.ctx.sources.read, worker.ctx.sources.fetch, worker.ctx.sources.marks = no_text, art, None

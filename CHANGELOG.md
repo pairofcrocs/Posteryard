@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Pick other art, use your own image, skip a title or render it again from the web UI.
 - Pause and resume Posteryard from the web UI, and retry every failed title at once.
 - Change the settings in the web UI, test the media server, TMDB, fanart.tv, Maintainerr and alert connections, and restart to apply them. Saved settings are kept in `data/settings.json` and override the environment.
+- See what TMDB is missing for your library in the web UI: titles without a logo or a textless poster, and the movies of TMDB collections you own part of.
 - Start only the web UI when the settings do not load, so they can be fixed there, instead of exiting. Without any password, the first visitor chooses one.
 
 ### Changed

@@ -185,3 +185,46 @@ password is `UI_PASSWORD` or `WEBHOOK_SECRET` from the environment and `settings
 visitor chooses the password: the settings routes work without a session, and `PUT /api/settings` must include a
 non-empty `UI_PASSWORD` (400 otherwise); its answer signs the visitor in. From then on they need the session.
 `POST /api/actions/restart` stops setup mode and starts `serve` again in the same process.
+
+## Missing art and collections (`api_missing.py`)
+
+A scan checks every movie and show in the managed libraries against TMDB (and fanart.tv when `FANART_API_KEY` is
+set). It runs on its own thread, so posters keep being made meanwhile, and reads the art choices Posteryard already
+made without changing them. The last report is kept in the database and survives a restart.
+
+| Route | Answer |
+| --- | --- |
+| `GET /api/missing` | `Report` (below). Before the first scan, `scan.state` is `never` and the lists are empty. |
+| `POST /api/missing/scan` | Starts a scan. `{"ok": true}`, or 409 while one runs. |
+
+`Report`:
+
+```json
+{
+  "scan": {"state": "never"|"running"|"done"|"failed", "checked": 120, "total": 812,
+           "started": 1760000000.0, "finished": 1760000300.0, "error": null},
+  "languages": ["en"],
+  "logos": [Title],
+  "textless": [Title],
+  "collections": [{
+    "id": 10, "name": "Dune Collection", "poster_url": "https://image.tmdb.org/t/p/w342/x.jpg",
+    "tmdb_url": "https://www.themoviedb.org/collection/10",
+    "owned": [{"key": "101", "tmdb_id": 438631, "title": "Dune", "year": 2021}],
+    "missing": [{"tmdb_id": 693134, "title": "Dune: Part Two", "year": 2024, "release_date": "2024-02-27",
+                 "released": true, "poster_url": "https://image.tmdb.org/t/p/w342/y.jpg",
+                 "tmdb_url": "https://www.themoviedb.org/movie/693134"}]
+  }],
+  "unmatched": [Title]
+}
+```
+
+`Title`: `{"key", "title", "year", "type": "movie"|"show", "library", "tmdb_id", "reason", "tmdb_url"}`. `tmdb_url`
+opens the TMDB page where the missing image can be added (`.../images/logos` or `.../images/posters`).
+
+- `logos`: no logo in any of `LOGO_LANGUAGES` on TMDB, nor on fanart.tv. The poster sets the name in text.
+- `textless`: no textless poster on TMDB (`reason` "TMDB has no textless poster"), or every one was found to have text
+  printed on it ("Every textless poster on TMDB has text on it"). The poster then uses a backdrop, Apple TV or
+  fanart.tv art.
+- `collections`: TMDB collections with at least one movie in the library and at least one movie not in it. A movie
+  without a release date, or released in the future, has `"released": false`.
+- `unmatched`: titles the server has not matched to TMDB, which the scan could not check.

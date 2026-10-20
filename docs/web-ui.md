@@ -52,6 +52,14 @@ The images saved in `data/previews` while `DRY_RUN` is on, newest first. Open on
 
 Titles that failed, with the error, and images that were changed by hand on the server, which Posteryard leaves alone. **Retry** tries a title again; **Retry all** tries every failed title. Open alerts are listed too.
 
+### Missing
+
+What TMDB lacks for your library, so you know where a better poster needs help. **Check now** reads TMDB, and fanart.tv with `FANART_API_KEY`, for every movie and show. Posters keep being made meanwhile. On a big library the check takes a few minutes. The last result is kept.
+
+- **Logos**: titles with no logo in your `LOGO_LANGUAGES`. Their poster has the name in text. Add a logo on TMDB, and the next daily pass uses it.
+- **Textless posters**: titles with no textless poster on TMDB, or only ones with the title printed on them. Their poster uses a backdrop or other art instead.
+- **Collections**: TMDB collections you own part of, with the movies you do not have. Movies not out yet are marked. Copy the list or download it as CSV, for example for Radarr.
+
 ### Live TV
 
 The posters made for the Live TV guide, with `LIVE_TV=true`. See [Live TV](how-it-works.md#live-tv).

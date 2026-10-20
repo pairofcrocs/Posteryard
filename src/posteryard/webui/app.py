@@ -65,12 +65,13 @@ class WebUi:
         self.on_restart: Callable[[], None] | None = service.request_restart if service is not None else None
         self._core_routes()
         # Imported here: the API modules import this one for the WebUi type.
-        from posteryard.webui import api_items, api_settings, api_status  # noqa: PLC0415
+        from posteryard.webui import api_items, api_missing, api_settings, api_status  # noqa: PLC0415
 
         api_settings.register(self)
         if service is not None:
             api_status.register(self)
             api_items.register(self)
+            api_missing.register(self)
 
     @property
     def setup(self) -> bool:

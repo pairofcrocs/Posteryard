@@ -123,6 +123,7 @@ In the web UI you can:
 - Browse your library and compare each poster with the server's own.
 - Pick other art, use your own image, or skip a title.
 - Check the previews, the recent changes and the problems, and retry what failed.
+- See which titles TMDB has no logo or textless poster for, and which movies of your collections you lack.
 - Change the settings, test the connections and restart.
 
 Settings saved in the web UI are kept in `data/settings.json`. They override the same lines in the compose file until you reset them in the web UI. If the settings do not load, for example on a first start without a TMDB key, Posteryard starts only the web UI, so you can fill them in there.

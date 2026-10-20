@@ -121,3 +121,21 @@ def test_a_read_access_token_is_sent_as_a_bearer_header(monkeypatch: pytest.Monk
     url, headers = sent[0]
     assert "api_key" not in url
     assert headers["Authorization"].startswith("Bearer eyJ")
+
+
+def test_a_collection_lists_its_movies(monkeypatch: pytest.MonkeyPatch) -> None:
+    parts = [{"id": 1, "title": "Dune"}, {"id": 2, "title": "Dune: Part Two"}]
+    monkeypatch.setattr(http, "request", answer({"/collection/10": {"id": 10, "name": "Dune", "parts": parts}}))
+    found = Tmdb("example-key").collection(10)
+    assert found is not None
+    assert [p["title"] for p in found["parts"]] == ["Dune", "Dune: Part Two"]
+    assert Tmdb("example-key").collection(99) is None
+
+
+def test_a_collection_outage_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    def request(method: str, url: str, **_kwargs: Any) -> bytes:
+        raise http.HttpError(500, url)
+
+    monkeypatch.setattr(http, "request", request)
+    with pytest.raises(http.HttpError):
+        Tmdb("example-key").collection(98)
